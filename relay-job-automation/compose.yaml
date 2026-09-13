@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay_local_only
+      POSTGRES_DB: relay
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - relay-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay -d relay"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build:
+      context: .
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://relay:relay_local_only@db:5432/relay
+    command: ["npm", "run", "db:migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://relay:relay_local_only@db:5432/relay
+      APP_URL: http://localhost:3000
+      JOB_ALLOWED_HOSTS: ${JOB_ALLOWED_HOSTS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://relay:relay_local_only@db:5432/relay
+      JOB_ALLOWED_HOSTS: ${JOB_ALLOWED_HOSTS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
+    restart: unless-stopped
+volumes:
+  relay-data:
